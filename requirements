@@ -1,0 +1,9 @@
+fastapi==0.115.6
+uvicorn[standard]==0.34.0
+pymorphy3==2.0.1
+pymorphy3-dicts-ru==2.4.1
+openpyxl==3.1.5
+python-docx==1.1.2
+PyPDF2==3.0.1
+python-multipart==0.0.20
+requests==2.32.3
