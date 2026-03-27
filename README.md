@@ -1,4 +1,3 @@
-@"
 # Word Analyzer
 
 Сервис для анализа частоты слов в текстовых файлах, документах Word и PDF.
@@ -31,7 +30,5 @@ uvicorn app.main:app --reload
 
 ## Тестирование
 
-\`\`\`bash
 python send_test.py
-\`\`\`
-"@ | Out-File -FilePath README.md -Encoding UTF8
+
