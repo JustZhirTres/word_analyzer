@@ -1,27 +1,27 @@
 # Word Analyzer
 
-Сервис для анализа частоты слов в текстовых файлах, документах Word и PDF.
+Сервис для анализа частоты слов в текстовых файлах (TXT).
 
 ## Возможности
 
-- Поддержка форматов: TXT, DOCX, PDF
+- Поддержка TXT файлов
+- Адаптивная стратегия обработки (In-Memory для файлов до 100MB, Hybrid для файлов до 1GB, Streaming для файлов до 5GB)
 - Лемматизация русских слов (pymorphy3)
 - Асинхронная обработка с очередью
-- Результат в формате Excel
+- Адаптивное масштабирование воркеров (от 2 до 10)
+- Результат в формате Excel (три колонки: словоформа, частота в документе, частота по строкам)
 
 ## Запуск
 
-\`\`\`bash
 pip install -r requirements.txt
 uvicorn app.main:app --reload
-\`\`\`
 
 ## API Endpoints
 
-- \`POST /public/report/export\` — загрузка файла
-- \`GET /public/report/status/{task_id}\` — статус обработки
-- \`GET /public/report/download/{task_id}\` — скачать результат
-- \`GET /public/report/queue/status\` — статус очереди
+POST /public/report/export — загрузка TXT файла
+GET /public/report/{task_id}/status — статус обработки
+GET /public/report/{task_id}/download — скачать результат
+GET /public/report/queue/status — статус очереди
 
 ## Документация
 
@@ -30,5 +30,6 @@ uvicorn app.main:app --reload
 
 ## Тестирование
 
-python send_test.py
+python scripts/generate_test_files.py
+python test_all_files.py
 
