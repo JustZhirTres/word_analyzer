@@ -1,62 +1,59 @@
+# app/domain/entities.py - добавляем новую сущность
+
 from dataclasses import dataclass, field
 from datetime import datetime
-from typing import Dict, List, Optional
 import uuid
 
 
 @dataclass
-class WordStatistics:
-    """Статистика по одному слову"""
-    total: int = 0
-    per_line: List[int] = field(default_factory=list)
+class WordFrequencyResult:
+    """Результат частотного анализа"""
+    word: str
+    total_count: int
+    line_counts: list[int]
 
-
-@dataclass
-class WordFrequencyStats:
-    """Статистика по всем словам"""
-    stats: Dict[str, WordStatistics] = field(default_factory=dict)
-
-    def add_word(self, word_form: str, line_num: int, count: int = 1):
-        """Добавляет вхождение слова"""
-        if word_form not in self.stats:
-            self.stats[word_form] = WordStatistics()
-
-        word_stat = self.stats[word_form]
-
-        # Расширяем список per_line если нужно
-        if len(word_stat.per_line) <= line_num:
-            word_stat.per_line.extend([0] * (line_num - len(word_stat.per_line) + 1))
-
-        word_stat.per_line[line_num] += count
-        word_stat.total += count
-
-    def ensure_line_counts(self, total_lines: int):
-        """Выравнивает списки per_line для всех слов"""
-        for word_stat in self.stats.values():
-            if len(word_stat.per_line) < total_lines:
-                word_stat.per_line.extend([0] * (total_lines - len(word_stat.per_line)))
+    def line_counts_str(self) -> str:
+        """Форматирует частоты по строкам в строку через запятую"""
+        return ','.join(str(count) for count in self.line_counts)
 
 
 @dataclass
 class Task:
     """Сущность задачи"""
-    task_id: str = field(default_factory=lambda: str(uuid.uuid4()))
-    status: str = 'queued'
+    task_id: str
+    filename: str
+    file_extension: str
+    status: str = "pending"
     progress: int = 0
     created_at: datetime = field(default_factory=datetime.now)
-    started_at: Optional[datetime] = None
-    completed_at: Optional[datetime] = None
-    failed_at: Optional[datetime] = None
-    error: Optional[str] = None
-
-    filename: str = ''
+    started_at: datetime | None = None
+    completed_at: datetime | None = None
+    failed_at: datetime | None = None
+    error: str | None = None
+    result_path: str | None = None
     file_size_mb: float = 0.0
-    file_extension: str = ''
-    result_path: Optional[str] = None
 
-    def to_dict(self) -> dict:
+    @classmethod
+    def create(cls, filename: str, file_extension: str) -> 'Task':
+        """Фабричный метод для создания задачи"""
+        if not filename or not filename.strip():
+            raise ValueError("Filename cannot be empty")
+
+        if not file_extension:
+            raise ValueError("File extension cannot be empty")
+
+        file_extension = file_extension.lower()
+        task_id = str(uuid.uuid4())
+
+        return cls(
+            task_id=task_id,
+            filename=filename.strip(),
+            file_extension=file_extension
+        )
+
+    def to_dict(self) -> dict[str, object]:
         """Преобразует в словарь для API"""
-        result = {
+        result: dict[str, object] = {
             'task_id': self.task_id,
             'status': self.status,
             'progress': self.progress,
@@ -65,15 +62,52 @@ class Task:
             'file_size_mb': self.file_size_mb
         }
 
-        if self.started_at:
-            result['started_at'] = self.started_at.isoformat()
-        if self.completed_at:
-            result['completed_at'] = self.completed_at.isoformat()
-        if self.failed_at:
-            result['failed_at'] = self.failed_at.isoformat()
-        if self.error:
-            result['error'] = self.error
+        optional_fields: dict[str, object] = {
+            'started_at': self.started_at,
+            'completed_at': self.completed_at,
+            'failed_at': self.failed_at,
+            'error': self.error,
+        }
+
+        for field_name, field_value in optional_fields.items():
+            if field_value is not None:
+                if isinstance(field_value, datetime):
+                    result[field_name] = field_value.isoformat()
+                else:
+                    result[field_name] = field_value
+
         if self.result_path:
             result['download_url'] = f'/public/report/download/{self.task_id}'
 
         return result
+
+    def start_processing(self) -> None:
+        """Начать обработку задачи"""
+        if self.status != "pending":
+            raise ValueError(f"Cannot start task with status {self.status}")
+        self.status = "processing"
+        self.started_at = datetime.now()
+        self.progress = 0
+
+    def update_progress(self, progress: int) -> None:
+        """Обновить прогресс"""
+        if not 0 <= progress <= 100:
+            raise ValueError("Progress must be between 0 and 100")
+        self.progress = progress
+
+    def complete(self, result_path: str) -> None:
+        """Завершить задачу успешно"""
+        if self.status != "processing":
+            raise ValueError(f"Cannot complete task with status {self.status}")
+        self.status = "completed"
+        self.completed_at = datetime.now()
+        self.progress = 100
+        self.result_path = result_path
+
+    def fail(self, error: str) -> None:
+        """Завершить задачу с ошибкой"""
+        if self.status not in ["pending", "processing"]:
+            raise ValueError(f"Cannot fail task with status {self.status}")
+        self.status = "failed"
+        self.failed_at = datetime.now()
+        self.error = error

@@ -1,31 +1,39 @@
-from typing import Dict, Optional
-from app.domain.entities import Task
+"""Репозиторий для хранения задач"""
+from typing import Any
+
+from ..domain.entities import Task
 
 
 class TaskRepository:
-    """Хранилище задач (in-memory)"""
+    """In-memory репозиторий задач"""
 
-    def __init__(self):
-        self._storage: Dict[str, Task] = {}
+    def __init__(self) -> None:
+        self._storage: dict[str, Task] = {}
 
-    def save(self, task: Task) -> Task:
-        """Сохраняет задачу"""
+    def create(self, filename: str, file_extension: str) -> Task:
+        """Создать новую задачу с использованием фабричного метода"""
+        task = Task.create(filename, file_extension)
         self._storage[task.task_id] = task
         return task
 
-    def get(self, task_id: str) -> Optional[Task]:
-        """Получает задачу по ID"""
+    def save(self, task: Task) -> None:
+        """Сохранить задачу"""
+        self._storage[task.task_id] = task
+
+    def get(self, task_id: str) -> Task | None:
+        """Получить задачу по ID"""
         return self._storage.get(task_id)
 
-    def get_all(self) -> Dict[str, Task]:
-        """Возвращает все задачи"""
-        return self._storage
+    def get_all(self) -> dict[str, Task]:
+        """Получить все задачи"""
+        return self._storage.copy()
 
-    def update(self, task_id: str, **kwargs) -> Optional[Task]:
-        """Обновляет поля задачи"""
+    def update(self, task_id: str, **kwargs: Any) -> Task | None:
+        """Обновить поля задачи"""
         task = self.get(task_id)
         if task:
             for key, value in kwargs.items():
                 if hasattr(task, key):
                     setattr(task, key, value)
+            self.save(task)
         return task

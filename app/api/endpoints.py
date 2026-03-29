@@ -1,113 +1,163 @@
-import os
 import asyncio
-from datetime import datetime
-from fastapi import APIRouter, File, UploadFile, HTTPException, BackgroundTasks
-from fastapi.responses import StreamingResponse, JSONResponse
+import os
 
-from app.config.settings import settings
-from app.domain.entities import Task
-from app.infrastructure.repositories import TaskRepository
-from app.application.use_cases import ProcessFileUseCase, GetTaskStatusUseCase, GetQueueStatusUseCase
+from fastapi import APIRouter, Depends, HTTPException, UploadFile, File, status
+from fastapi.responses import FileResponse
 
-router = APIRouter()
+from ..application.use_cases import (
+    ProcessFileUseCase,
+    GetTaskStatusUseCase,
+    GetQueueStatusUseCase,
+    CreateTaskUseCase,
+)
+from ..infrastructure.repositories import TaskRepository
+from ..config.settings import settings
+from ..infrastructure.logger import logger
+from .schemas import TaskResponse, QueueStatusResponse, ErrorResponse
 
 
-def create_upload_routes(
-        task_repo: TaskRepository,
-        task_queue: asyncio.Queue,
-        process_file_uc: ProcessFileUseCase,
-        get_status_uc: GetTaskStatusUseCase,
-        get_queue_uc: GetQueueStatusUseCase
+router = APIRouter(prefix="/public/report", tags=["report"])
+
+
+def get_task_repo() -> TaskRepository:
+    from ..main import app
+    return app.state.task_repo
+
+
+def get_task_queue():
+    from ..main import app
+    return app.state.task_queue
+
+
+def get_process_file_uc() -> ProcessFileUseCase:
+    from ..main import app
+    return app.state.process_file_uc
+
+
+def get_get_status_uc() -> GetTaskStatusUseCase:
+    from ..main import app
+    return app.state.get_status_uc
+
+
+def get_get_queue_uc() -> GetQueueStatusUseCase:
+    from ..main import app
+    return app.state.get_queue_uc
+
+
+@router.post(
+    "/export",
+    status_code=status.HTTP_202_ACCEPTED,  # Всегда 202, никогда не блокируем
+    response_model=TaskResponse,
+    summary="Загрузить TXT файл для анализа",
+)
+async def upload_file(
+    file: UploadFile = File(...),
+    task_repo: TaskRepository = Depends(get_task_repo),
+    task_queue: asyncio.Queue = Depends(get_task_queue),
 ):
-    """Создаёт эндпоинты с зависимостями"""
-
-    @router.post("/public/report/export")
-    async def export_report(file: UploadFile = File(...)):
-        """Загрузка файла и создание задачи"""
-        # Проверяем расширение
-        file_extension = os.path.splitext(file.filename)[1].lower()
-        if file_extension not in settings.ALLOWED_EXTENSIONS:
-            raise HTTPException(
-                400,
-                f"Unsupported file format. Allowed: {', '.join(settings.ALLOWED_EXTENSIONS)}"
-            )
-
-        # Проверяем очередь
-        if task_queue.qsize() >= settings.MAX_QUEUE_SIZE:
-            raise HTTPException(429, "Server is busy. Please try again later.")
-
-        # Сохраняем файл
-        task = Task(
-            filename=file.filename,
-            file_extension=file_extension
+    """Загрузка TXT файла"""
+    file_extension = os.path.splitext(file.filename)[1].lower()
+    if file_extension not in settings.ALLOWED_EXTENSIONS:
+        raise HTTPException(
+            status_code=400,
+            detail=f"Unsupported file format. Only TXT files are supported."
         )
 
-        upload_dir = os.path.join(settings.BASE_DIR, "uploads")
-        os.makedirs(upload_dir, exist_ok=True)
-        temp_file = os.path.join(upload_dir, f"{task.task_id}{file_extension}")
+    queue_size = task_queue.qsize()
+    logger.info(f"New task. Queue size: {queue_size}")
 
-        try:
-            with open(temp_file, 'wb') as f:
-                while True:
-                    chunk = await file.read(settings.CHUNK_SIZE)
-                    if not chunk:
-                        break
-                    f.write(chunk)
+    create_uc = CreateTaskUseCase(task_repo)
 
-            file_size = os.path.getsize(temp_file)
-            task.file_size_mb = file_size / (1024 * 1024)
-            task_repo.save(task)
+    upload_dir = settings.UPLOADS_DIR
+    os.makedirs(upload_dir, exist_ok=True)
+    temp_file = os.path.join(upload_dir, f"{file.filename}_{id(file)}.tmp")
+    
+    file_size = 0
+    try:
+        with open(temp_file, 'wb') as f:
+            while True:
+                chunk = await file.read(settings.CHUNK_SIZE_SMALL)
+                if not chunk:
+                    break
+                f.write(chunk)
+                file_size += len(chunk)
 
-            # Добавляем в очередь
-            await task_queue.put((task.task_id, temp_file))
+        task = task_repo.create(file.filename, file_extension)
+        task.file_size_mb = file_size / (1024 * 1024)
+        task_repo.save(task)
 
-            return JSONResponse({
-                'task_id': task.task_id,
-                'status': 'queued',
-                'queue_position': task_queue.qsize(),
-                'file_size_mb': task.file_size_mb,
-                'file_format': file_extension[1:].upper(),
-                'check_status_url': f'/public/report/status/{task.task_id}'
-            })
+        final_temp_file = os.path.join(upload_dir, f"{task.task_id}.txt")
+        os.rename(temp_file, final_temp_file)
+        
 
-        except Exception as e:
-            if os.path.exists(temp_file):
-                os.unlink(temp_file)
-            raise HTTPException(500, f"Failed to process request: {str(e)}")
-
-    @router.get("/public/report/status/{task_id}")
-    async def get_task_status(task_id: str):
-        """Получение статуса задачи"""
-        result = get_status_uc.execute(task_id)
-        if not result:
-            raise HTTPException(404, "Task not found")
-        return JSONResponse(result)
-
-    @router.get("/public/report/download/{task_id}")
-    async def download_report(task_id: str):
-        """Скачивание готового отчёта"""
-        task = task_repo.get(task_id)
-        if not task:
-            raise HTTPException(404, "Task not found")
-
-        if task.status != 'completed':
-            raise HTTPException(400, f"Task not completed. Status: {task.status}")
-
-        if not task.result_path or not os.path.exists(task.result_path):
-            raise HTTPException(404, "Result file not found")
-
-        original_name = task.filename.rsplit('.', 1)[0]
-        filename = f"{original_name}_report.xlsx"
-
-        return StreamingResponse(
-            open(task.result_path, 'rb'),
-            media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-            headers={"Content-Disposition": f"attachment; filename={filename}"}
+        await task_queue.put((task.task_id, final_temp_file))
+        
+        logger.info(
+            f"Task {task.task_id} added. "
+            f"Size: {task.file_size_mb:.2f} MB. "
+            f"Queue size: {task_queue.qsize()}"
         )
+        
+        return TaskResponse.model_validate(task.to_dict())
+        
+    except Exception as e:
+        logger.error(f"Upload error: {e}")
+        if os.path.exists(temp_file):
+            os.remove(temp_file)
+        raise HTTPException(status_code=500, detail=f"Upload failed: {str(e)}")
 
-    @router.get("/public/report/queue/status")
-    async def get_queue_status():
-        """Статус очереди"""
-        return JSONResponse(get_queue_uc.execute())
 
-    return router
+@router.get(
+    "/{task_id}/status",
+    response_model=TaskResponse,
+    summary="Получить статус задачи",
+)
+async def get_status(
+    task_id: str,
+    get_status_uc: GetTaskStatusUseCase = Depends(get_get_status_uc),
+):
+    task = get_status_uc.execute(task_id)
+    if not task:
+        raise HTTPException(status_code=404, detail="Task not found")
+    return TaskResponse.model_validate(task.to_dict())
+
+
+@router.get(
+    "/{task_id}/download",
+    summary="Скачать результат",
+)
+async def download_result(
+    task_id: str,
+    task_repo: TaskRepository = Depends(get_task_repo),
+):
+    task = task_repo.get(task_id)
+    if not task:
+        raise HTTPException(status_code=404, detail="Task not found")
+    
+    if task.status != "completed":
+        raise HTTPException(
+            status_code=400,
+            detail=f"Task not completed yet. Current status: {task.status}"
+        )
+    
+    if not task.result_path or not os.path.exists(task.result_path):
+        raise HTTPException(status_code=404, detail="Result file not found")
+    
+    return FileResponse(
+        path=task.result_path,
+        filename=f"{task.filename}_analysis.xlsx",
+        media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+    )
+
+
+@router.get(
+    "/queue/status",
+    response_model=QueueStatusResponse,
+    summary="Статус очереди"
+)
+async def get_queue_status(
+    get_queue_uc: GetQueueStatusUseCase = Depends(get_get_queue_uc),
+):
+    """Получение статуса очереди"""
+    status_obj = get_queue_uc.execute()
+    return QueueStatusResponse.model_validate(status_obj.to_dict())

@@ -1,30 +1,30 @@
-# app/config/settings.py
 import os
 from dataclasses import dataclass, field
-from typing import Set
 
 
 @dataclass
 class Settings:
     """Настройки приложения"""
 
-    # Очередь и обработка
     MAX_CONCURRENT_TASKS: int = 2
-    MAX_QUEUE_SIZE: int = 50
-    CHUNK_SIZE: int = 1024 * 1024  # 1MB
+    MAX_QUEUE_SIZE: int = 0
 
-    # Пути
+    CHUNK_SIZE_SMALL: int = 1024 * 1024  # 1MB для маленьких файлов
+    CHUNK_SIZE_LARGE: int = 10 * 1024 * 1024  # 10MB для больших файлов
+
+    HYBRID_THRESHOLD: int = 100 * 1024 * 1024  # 100MB
+    STREAMING_THRESHOLD: int = 1024 * 1024 * 1024  # 1GB
+
     BASE_DIR: str = os.path.dirname(os.path.dirname(os.path.dirname(__file__)))
     RESULTS_DIR: str = os.path.join(BASE_DIR, "results")
+    UPLOADS_DIR: str = os.path.join(BASE_DIR, "uploads")
+    TEMP_STATS_DIR: str = os.path.join(BASE_DIR, "temp_stats")
     TEST_FILES_DIR: str = os.path.join(BASE_DIR, "test_files")
 
-    # Поддерживаемые форматы (используем field с default_factory)
-    ALLOWED_EXTENSIONS: Set[str] = field(default_factory=lambda: {'.txt', '.docx', '.pdf'})
+    ALLOWED_EXTENSIONS: set[str] = field(default_factory=lambda: {'.txt'})
 
-    def __post_init__(self):
-        """Создаём папки если их нет"""
-        os.makedirs(self.RESULTS_DIR, exist_ok=True)
-        os.makedirs(self.TEST_FILES_DIR, exist_ok=True)
+    HOST: str = "127.0.0.1"
+    PORT: int = 8000
 
 
 settings = Settings()
