@@ -1,0 +1,34 @@
+# Word Analyzer
+
+Сервис для анализа частоты слов в текстовых файлах, документах Word и PDF.
+
+## Возможности
+
+- Поддержка форматов: TXT, DOCX, PDF
+- Лемматизация русских слов (pymorphy3)
+- Асинхронная обработка с очередью
+- Результат в формате Excel
+
+## Запуск
+
+\`\`\`bash
+pip install -r requirements.txt
+uvicorn app.main:app --reload
+\`\`\`
+
+## API Endpoints
+
+- \`POST /public/report/export\` — загрузка файла
+- \`GET /public/report/status/{task_id}\` — статус обработки
+- \`GET /public/report/download/{task_id}\` — скачать результат
+- \`GET /public/report/queue/status\` — статус очереди
+
+## Документация
+
+- Swagger UI: \`http://localhost:8000/docs\`
+- ReDoc: \`http://localhost:8000/redoc\`
+
+## Тестирование
+
+python send_test.py
+
